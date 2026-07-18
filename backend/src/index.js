@@ -6,6 +6,8 @@ const { initDb } = require('./db');
 const authRoutes = require('./routes/auth.routes');
 const caseRoutes = require('./routes/case.routes');
 const reportRoutes = require('./routes/report.routes');
+const transactionRoutes = require('./routes/transaction.routes');
+const vendorRoutes = require('./routes/vendor.routes');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -17,6 +19,8 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/cases', caseRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/transactions', transactionRoutes);
+app.use('/api/vendors', vendorRoutes);
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'GhostAudit Backend' }));

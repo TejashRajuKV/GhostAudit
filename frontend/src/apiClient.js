@@ -31,7 +31,18 @@ export const casesApi = {
   get: (id) => api.get(`/api/cases/${id}`),
   generateVerdict: (id) => api.post(`/api/cases/${id}/verdict`),
   getVerdict: (id) => api.get(`/api/cases/${id}/verdict`),
-  submitFeedback: (id, status) => api.post(`/api/cases/${id}/feedback`, { status }),
+  submitFeedback: (id, status, feedbackText) => api.post(`/api/cases/${id}/feedback`, { status, feedbackText }),
+};
+
+export const transactionsApi = {
+  getAll: () => api.get('/api/transactions'),
+  create: (data) => api.post('/api/transactions', data),
+  bulkCreate: (data) => api.post('/api/transactions/bulk', data),
+};
+
+export const vendorsApi = {
+  getAll: () => api.get('/api/vendors'),
+  verifyGst: (id) => api.get(`/api/vendors/${id}/gst-verify`),
 };
 
 export const reportsApi = {

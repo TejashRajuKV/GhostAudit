@@ -44,7 +44,8 @@ async function scanCases(req, res) {
             "SELECT id FROM cases WHERE vendor_id = ? AND fraud_type = 'SPLIT_INVOICE'"
           ).get(vendorId);
           if (!existing) {
-            const txIds = JSON.stringify(group.map(t => t.id));
+            const txIdsArray = group.map(t => t.id);
+            const txIds = JSON.stringify(txIdsArray);
             const confidence = Math.min(95, 60 + group.length * 8);
             const result = db.prepare(
               `INSERT INTO cases (vendor_id, transaction_ids, fraud_type, severity, confidence, status, summary)
@@ -53,6 +54,7 @@ async function scanCases(req, res) {
               vendorId, txIds, confidence,
               `${group.length} invoices to ${vendor.name} totalling ₹${total.toLocaleString('en-IN')} in a 30-day window — each below the ₹${threshold.toLocaleString('en-IN')} approval threshold. Possible threshold-bypass pattern.`
             );
+            db.prepare(`UPDATE transactions SET is_flagged = 1 WHERE id IN (${txIdsArray.map(() => '?').join(',')})`).run(...txIdsArray);
             cases.push({ id: result.lastInsertRowid, type: 'SPLIT_INVOICE', vendor: vendor.name });
           }
         }
@@ -71,7 +73,8 @@ async function scanCases(req, res) {
                 "SELECT id FROM cases WHERE vendor_id = ? AND fraud_type = 'ROUND_TRIPPING'"
               ).get(vendorId);
               if (!existingCircular) {
-                const txIds = JSON.stringify([tx.id, otherTx.id]);
+                const txIdsArray = [tx.id, otherTx.id];
+                const txIds = JSON.stringify(txIdsArray);
                 const vendor2 = vendors.find(v => v.id == otherVendorId);
                 const result = db.prepare(
                   `INSERT INTO cases (vendor_id, transaction_ids, fraud_type, severity, confidence, status, summary)
@@ -80,6 +83,7 @@ async function scanCases(req, res) {
                   vendorId, txIds,
                   `Circular payment detected: ${vendor.name} (₹${tx.amount.toLocaleString('en-IN')}) ↔ ${vendor2?.name || 'Unknown'} (₹${otherTx.amount.toLocaleString('en-IN')}) within ${Math.round(daysDiff)} days. Amounts differ by less than 5%.`
                 );
+                db.prepare(`UPDATE transactions SET is_flagged = 1 WHERE id IN (?, ?)`).run(...txIdsArray);
                 cases.push({ id: result.lastInsertRowid, type: 'ROUND_TRIPPING', vendor: vendor.name });
               }
             }
@@ -93,7 +97,8 @@ async function scanCases(req, res) {
           "SELECT id FROM cases WHERE vendor_id = ? AND fraud_type = 'GHOST_VENDOR'"
         ).get(vendorId);
         if (!existing) {
-          const txIds = JSON.stringify(txList.map(t => t.id));
+          const txIdsArray = txList.map(t => t.id);
+          const txIds = JSON.stringify(txIdsArray);
           const result = db.prepare(
             `INSERT INTO cases (vendor_id, transaction_ids, fraud_type, severity, confidence, status, summary)
              VALUES (?, ?, 'GHOST_VENDOR', 'CRITICAL', ?, 'OPEN', ?)`
@@ -101,7 +106,31 @@ async function scanCases(req, res) {
             vendorId, txIds, vendor.ghost_score,
             `${vendor.name} flagged as a potential shell/ghost vendor. Ghost score: ${vendor.ghost_score}/100. Issues: ${getGhostIssues(vendor).join(', ')}.`
           );
+          db.prepare(`UPDATE transactions SET is_flagged = 1 WHERE id IN (${txIdsArray.map(() => '?').join(',')})`).run(...txIdsArray);
           cases.push({ id: result.lastInsertRowid, type: 'GHOST_VENDOR', vendor: vendor.name });
+        }
+      }
+      // --- DETECTION 3: Delayed Payment ---
+      for (const tx of txList) {
+        if (!tx.payment_date) continue;
+        const daysDiff = (new Date(tx.payment_date) - new Date(tx.invoice_date)) / (1000 * 60 * 60 * 24);
+        if (daysDiff > 45) {
+          const existing = db.prepare(
+            "SELECT id FROM cases WHERE vendor_id = ? AND fraud_type = 'DELAYED_PAYMENT'"
+          ).get(vendorId);
+          if (!existing) {
+            const txIdsArray = [tx.id];
+            const txIds = JSON.stringify(txIdsArray);
+            const result = db.prepare(
+              `INSERT INTO cases (vendor_id, transaction_ids, fraud_type, severity, confidence, status, summary)
+               VALUES (?, ?, 'DELAYED_PAYMENT', 'MEDIUM', 100, 'OPEN', ?)`
+            ).run(
+              vendorId, txIds,
+              `Payment of ₹${tx.amount.toLocaleString('en-IN')} to ${vendor.name} was made ${Math.round(daysDiff)} days after invoice date, violating the 45-day MSME payment rule.`
+            );
+            db.prepare(`UPDATE transactions SET is_flagged = 1 WHERE id = ?`).run(tx.id);
+            cases.push({ id: result.lastInsertRowid, type: 'DELAYED_PAYMENT', vendor: vendor.name });
+          }
         }
       }
     }
@@ -185,7 +214,7 @@ async function generateVerdict(req, res) {
     const aiRes = await axios.post(`${AI_SERVICE_URL}/analyze`, {
       case: caseData,
       transactions
-    }, { timeout: 60000 });
+    }, { timeout: 180000 });
 
     const { risk_replay, evidence, defense, verdict, confidence, verdict_reasoning, explanation } = aiRes.data;
 
@@ -216,11 +245,17 @@ function getVerdict(req, res) {
 // POST /api/cases/:id/feedback
 function submitFeedback(req, res) {
   const db = getDb();
-  const { status } = req.body; // 'CONFIRMED', 'DISMISSED'
+  const { status, feedbackText } = req.body; // 'CONFIRMED', 'DISMISSED'
   if (!['CONFIRMED', 'DISMISSED'].includes(status)) {
     return res.status(400).json({ error: 'Status must be CONFIRMED or DISMISSED' });
   }
-  db.prepare("UPDATE cases SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, req.params.id);
+  
+  if (feedbackText) {
+    db.prepare("UPDATE cases SET status = ?, feedback_text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, feedbackText, req.params.id);
+  } else {
+    db.prepare("UPDATE cases SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, req.params.id);
+  }
+  
   res.json({ success: true, status });
 }
 

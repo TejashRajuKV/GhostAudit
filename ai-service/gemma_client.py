@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-API_KEY = os.environ.get("GEMINI_API_KEY")
+API_KEYS = [k.strip() for k in os.environ.get("GEMINI_API_KEY", "").split(",") if k.strip()]
 MODEL   = os.environ.get("GEMMA_MODEL", "gemma-4-31b-it")
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
@@ -25,9 +25,11 @@ def call_gemma(prompt: str, max_tokens: int = 1024, retries: int = 3) -> str:
         }
     }
     headers = {"Content-Type": "application/json"}
-    params  = {"key": API_KEY}
 
     for attempt in range(retries):
+        api_key = API_KEYS[attempt % len(API_KEYS)] if API_KEYS else ""
+        params  = {"key": api_key}
+
         try:
             resp = requests.post(url, headers=headers, params=params, json=payload, timeout=90)
             if resp.status_code == 429:
@@ -37,7 +39,12 @@ def call_gemma(prompt: str, max_tokens: int = 1024, retries: int = 3) -> str:
                 continue
             resp.raise_for_status()
             data = resp.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"]
+            parts = data["candidates"][0]["content"]["parts"]
+            # Extract the actual text response, bypassing any 'thought' parts
+            for part in reversed(parts):
+                if not part.get("thought", False):
+                    return part["text"]
+            return parts[-1]["text"]
         except requests.HTTPError as e:
             err_body = {}
             try:

@@ -2,7 +2,32 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { casesApi } from '../apiClient';
 
-const fraudLabel = { SPLIT_INVOICE: 'Split Invoice', ROUND_TRIPPING: 'Round-Tripping', GHOST_VENDOR: 'Ghost Vendor' };
+import { ModeContext } from '../App';
+
+const fraudLabel = { SPLIT_INVOICE: 'Split Invoice', ROUND_TRIPPING: 'Round-Tripping', GHOST_VENDOR: 'Ghost Vendor', DELAYED_PAYMENT: 'Delayed Payment' };
+
+function AutoRemediationPanel({ fraudType }) {
+  const remedies = {
+    SPLIT_INVOICE: 'Recommendation: Enforce strict Purchase Order (PO) matching for this vendor and review approval threshold limits.',
+    GHOST_VENDOR: 'Recommendation: Temporarily freeze payments and request physical verification of the business address. Verify GSTIN status on the official portal.',
+    ROUND_TRIPPING: 'Recommendation: Flag for internal audit. Review the business necessity of circular transactions between these entities.',
+    DELAYED_PAYMENT: 'Recommendation: Expedite payment immediately to avoid MSME interest penalties. Review accounts payable workflow.'
+  };
+
+  const remedy = remedies[fraudType];
+  if (!remedy) return null;
+
+  return (
+    <div className="card mb-24" style={{ border: '1px solid var(--accent-light)' }}>
+      <div className="card-header" style={{ background: 'var(--surface-light)' }}>
+        <h3 style={{ color: 'var(--accent)' }}>🛡️ Auto-Remediation Agent</h3>
+      </div>
+      <div className="card-body">
+        <p style={{ fontWeight: 600, margin: 0, padding: 8 }}>{remedy}</p>
+      </div>
+    </div>
+  );
+}
 
 function RiskReplayTrail({ steps }) {
   if (!steps || steps.length === 0) return null;
@@ -78,7 +103,7 @@ function ExplanationPanel({ text }) {
   return (
     <div className="explanation-panel fade-in">
       <div className="explanation-icon">🗣️</div>
-      <div className="explanation-title">Plain-Language Explanation</div>
+      <div className="explanation-title">Summary</div>
       <div className="explanation-text">{text}</div>
     </div>
   );
@@ -108,16 +133,16 @@ function RiskGraph({ caseData }) {
   
   return (
     <div className="risk-graph-container fade-in">
-      <div className="graph-node user" style={{ left: '15%', top: '40%' }}>
+      <div className="graph-node user" style={{ left: '25%', top: '50%' }}>
         <div className="graph-node-circle">🏢</div>
         <div className="graph-node-label">Your Company</div>
       </div>
       
-      <div className="graph-edge" style={{ left: '15%', width: '50%', transform: 'rotate(0deg)' }}>
+      <div className="graph-edge" style={{ left: '25%', top: '50%', width: '50%', transform: 'translateY(-50%)' }}>
         <div className="graph-edge-label">{caseData.transactions.length} txns / ₹{totalAmount.toLocaleString('en-IN')}</div>
       </div>
       
-      <div className="graph-node vendor" style={{ right: '15%', top: '40%' }}>
+      <div className="graph-node vendor" style={{ left: '75%', top: '50%' }}>
         <div className="graph-node-circle">🕴️</div>
         <div className="graph-node-label">{caseData.vendor_name || 'Vendor'}</div>
       </div>
@@ -134,6 +159,8 @@ export default function CaseDetailPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState('');
   const [verdict, setVerdict] = useState(null);
+  const [feedbackText, setFeedbackText] = useState('');
+  const { smeMode } = React.useContext(ModeContext);
 
   const loadCase = async () => {
     try {
@@ -184,7 +211,8 @@ export default function CaseDetailPage() {
 
   const handleFeedback = async (status) => {
     try {
-      await casesApi.submitFeedback(id, status);
+      await casesApi.submitFeedback(id, status, feedbackText);
+      setFeedbackText('');
       loadCase();
     } catch { setError('Feedback failed.'); }
   };
@@ -205,11 +233,27 @@ export default function CaseDetailPage() {
             {' '} · Confidence {c.confidence}% · {c.status}
           </p>
         </div>
-        <div className="flex gap-12">
-          {c.status === 'CONFIRMED' || c.status === 'DISMISSED' ? null : (
+        <div className="flex gap-12" style={{ alignItems: 'flex-end', flexDirection: 'column', width: '400px' }}>
+          {c.status === 'CONFIRMED' || c.status === 'DISMISSED' ? (
+             c.feedback_text && (
+               <div className="text-muted" style={{ fontSize: '0.8rem', fontStyle: 'italic', textAlign: 'right' }}>
+                 " {c.feedback_text} "
+               </div>
+             )
+          ) : (
             <>
-              <button className="btn btn-danger btn-sm" onClick={() => handleFeedback('DISMISSED')}>✖ Dismiss</button>
-              <button className="btn btn-success btn-sm" onClick={() => handleFeedback('CONFIRMED')}>✔ Confirm</button>
+              <textarea 
+                className="form-input" 
+                placeholder="Provide feedback to train the AI model (e.g. 'Legit payment delay due to bank holiday')..."
+                value={feedbackText}
+                onChange={e => setFeedbackText(e.target.value)}
+                rows={2}
+                style={{ width: '100%', resize: 'vertical' }}
+              />
+              <div className="flex gap-12">
+                <button className="btn btn-danger btn-sm" onClick={() => handleFeedback('DISMISSED')}>✖ Dismiss</button>
+                <button className="btn btn-success btn-sm" onClick={() => handleFeedback('CONFIRMED')}>✔ Confirm</button>
+              </div>
             </>
           )}
         </div>
@@ -258,8 +302,10 @@ export default function CaseDetailPage() {
         </div>
       </div>
 
+      <AutoRemediationPanel fraudType={c.fraud_type} />
+
       {/* Tier 2 Visualizations */}
-      {c.transactions?.length > 0 && (
+      {!smeMode && c.transactions?.length > 0 && (
         <div className="grid-2 mb-24">
           <div className="card">
             <div className="card-header">
@@ -309,43 +355,58 @@ export default function CaseDetailPage() {
         </div>
       ) : (
         <div className="stagger">
-          {/* Risk Replay */}
-          <div className="card mb-24">
-            <div className="card-header">
-              <h3>🎯 AI Risk Replay</h3>
-              <span className="badge badge-analyzed">Gemma</span>
+          {/* Plain Language (Prioritized in SME mode) */}
+          {smeMode && verdict.explanation && (
+            <div className="card mb-24">
+              <div className="card-header">
+                <h3>💬 Summary</h3>
+              </div>
+              <div className="card-body">
+                <ExplanationPanel text={verdict.explanation} />
+              </div>
             </div>
-            <div className="card-body">
-              <RiskReplayTrail steps={verdict.riskReplay?.steps} />
-            </div>
-          </div>
+          )}
 
-          {/* AI Prosecutor */}
-          <div className="card mb-24">
-            <div className="card-header">
-              <h3>⚖️ AI Prosecutor — Evidence vs Defense</h3>
-              <span className="badge badge-analyzed">Gemma</span>
+          {!smeMode && (
+            <div className="card mb-24">
+              <div className="card-header">
+                <h3>🎯 AI Risk Replay</h3>
+                <span className="badge badge-analyzed">Gemma</span>
+              </div>
+              <div className="card-body">
+                <RiskReplayTrail steps={verdict.riskReplay?.steps} />
+              </div>
             </div>
-            <div className="card-body">
-              <ProsecutorPanel
-                evidence={verdict.evidence}
-                defense={verdict.defense}
-                verdict={verdict.verdict}
-                confidence={verdict.confidence}
-                reasoning={verdict.reasoning}
-              />
-            </div>
-          </div>
+          )}
 
-          {/* Plain Language */}
-          <div className="card mb-24">
-            <div className="card-header">
-              <h3>💬 Explain Like I'm Not an Auditor</h3>
+          {!smeMode && (
+            <div className="card mb-24">
+              <div className="card-header">
+                <h3>⚖️ AI Prosecutor — Evidence vs Defense</h3>
+                <span className="badge badge-analyzed">Gemma</span>
+              </div>
+              <div className="card-body">
+                <ProsecutorPanel
+                  evidence={verdict.evidence}
+                  defense={verdict.defense}
+                  verdict={verdict.verdict}
+                  confidence={verdict.confidence}
+                  reasoning={verdict.reasoning}
+                />
+              </div>
             </div>
-            <div className="card-body">
-              <ExplanationPanel text={verdict.explanation} />
+          )}
+
+          {!smeMode && (
+            <div className="card mb-24">
+              <div className="card-header">
+                <h3>💬 Summary</h3>
+              </div>
+              <div className="card-body">
+                <ExplanationPanel text={verdict.explanation} />
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>

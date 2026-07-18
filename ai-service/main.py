@@ -46,13 +46,13 @@ class ReportRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    api_key = os.environ.get("GEMINI_API_KEY", "")
+    api_keys = [k.strip() for k in os.environ.get("GEMINI_API_KEY", "").split(",") if k.strip()]
     return {
         "status": "ok",
         "service": "GhostAudit AI Service",
         "model": os.environ.get("GEMMA_MODEL", "gemma-4-31b-it"),
         "mock_mode": USE_MOCK,
-        "api_key_set": bool(api_key),
+        "api_key_set": bool(api_keys),
     }
 
 

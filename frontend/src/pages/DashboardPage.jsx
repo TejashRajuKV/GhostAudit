@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { casesApi } from '../apiClient';
 
+import { ModeContext } from '../App';
+
 const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
-const fraudLabel = { SPLIT_INVOICE: 'Split Invoice', ROUND_TRIPPING: 'Round-Tripping', GHOST_VENDOR: 'Ghost Vendor' };
+const fraudLabel = { SPLIT_INVOICE: 'Split Invoice', ROUND_TRIPPING: 'Round-Tripping', GHOST_VENDOR: 'Ghost Vendor', DELAYED_PAYMENT: 'Delayed Payment' };
 
 function ConfidenceBar({ value }) {
   const cls = value >= 75 ? 'conf-high' : value >= 50 ? 'conf-medium' : 'conf-low';
@@ -26,6 +28,7 @@ export default function DashboardPage() {
   const [error, setError] = useState('');
   const [scanMsg, setScanMsg] = useState('');
   const navigate = useNavigate();
+  const { smeMode } = React.useContext(ModeContext);
 
   const loadCases = async () => {
     try {
@@ -105,17 +108,17 @@ export default function DashboardPage() {
           <div className="stat-sub">Flagged this session</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">High / Critical</div>
+          <div className="stat-label">{smeMode ? 'Urgent Attention' : 'High / Critical'}</div>
           <div className="stat-value" style={{ color: 'var(--danger)' }}>{stats.critical}</div>
           <div className="stat-sub">Require immediate review</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Ghost Vendors</div>
+          <div className="stat-label">{smeMode ? 'Fake Suppliers' : 'Ghost Vendors'}</div>
           <div className="stat-value" style={{ color: 'var(--accent-light)' }}>{stats.ghost}</div>
           <div className="stat-sub">Shell company flags</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Invoice Fraud</div>
+          <div className="stat-label">{smeMode ? 'Policy Breaches' : 'Invoice Fraud'}</div>
           <div className="stat-value" style={{ color: 'var(--warning)' }}>{stats.split}</div>
           <div className="stat-sub">Split / round-tripping</div>
         </div>
@@ -143,7 +146,7 @@ export default function DashboardPage() {
                   <th>Vendor</th>
                   <th>Fraud Type</th>
                   <th>Severity</th>
-                  <th>Confidence</th>
+                  {!smeMode && <th>Confidence</th>}
                   <th>Status</th>
                   <th>Action</th>
                 </tr>
@@ -159,7 +162,7 @@ export default function DashboardPage() {
                       <span className={`fraud-tag fraud-${c.fraud_type}`}>{fraudLabel[c.fraud_type] || c.fraud_type}</span>
                     </td>
                     <td>{severityBadge(c.severity)}</td>
-                    <td style={{ minWidth: 160 }}><ConfidenceBar value={c.confidence} /></td>
+                    {!smeMode && <td style={{ minWidth: 160 }}><ConfidenceBar value={c.confidence} /></td>}
                     <td>{statusBadge(c.status)}</td>
                     <td>
                       <button

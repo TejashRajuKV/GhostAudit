@@ -1,0 +1,70 @@
+# Ghost Audit
+
+## 1. Project Overview
+
+**Ghost Audit** is an AI-native compliance and risk triage platform built for the Build with Gemma Hackathon (Track 2: Financial Compliance & Risk Triage). It helps organizations continuously assess policy adherence, flag risk exposures, and recommend remediation actions using a mix of AI reasoning and rule-based validation.
+
+Why it matters:
+- Compliance reviews are manual, fragmented, and reactive.
+- Financial institutions and SMEs need faster, evidence-backed decisions.
+- Regulatory risk is expensive when issues are discovered late.
+
+## 2. Why Gemma
+
+Gemma was chosen because it enables rapid prototyping of AI-first compliance workflows:
+- It supports structured reasoning over mixed data sources.
+- It can turn text, policy definitions, and event data into explainable decisions.
+- It improves over traditional software by using AI to infer context, not just match keywords.
+
+Traditional solutions are insufficient because:
+- They rely on static rule sets or spreadsheets.
+- They struggle with ambiguity in policies and nonstandard documents.
+- They do not connect AI reasoning directly to risk-scoring workflows.
+
+Gemma improves decision making by:
+- Extracting intent and compliance signals from documents
+- Generating ranked risk issues rather than raw alerts
+- Providing a single source of truth for compliance review
+
+## 3. Target Users
+
+Primary customers:
+- Compliance officers
+- Risk managers
+- Audit teams in regulated companies
+
+Secondary customers:
+- SMEs with limited compliance resources
+- Operations managers monitoring vendor or transaction risk
+- Internal audit and governance teams
+
+Pain points solved:
+- Slow manual reviews
+- Inconsistent risk classification
+- Missed policy gaps in documents and procedures
+
+Benefits:
+- Faster risk triage
+- Consistent, explainable audit evidence
+- Actionable remediation guidance
+
+## 4. Solution Architecture
+
+High-level workflow:
+1. Ingest compliance documents, transaction metadata, and policy definitions
+2. Normalize and parse content
+3. Apply AI reasoning and rule evaluation
+4. Generate risk scores, compliance gaps, and remediation recommendations
+5. Present results in a dashboard and exportable audit report
+
+End-to-end flow:
+
+```mermaid
+flowchart LR
+    A[Input data] --> B[Parser / Normalizer]
+    B --> C[Policy & Risk Engine]
+    C --> D[AI Reasoning / Gemma]
+    D --> E[Scoring + Prioritization]
+    E --> F[Dashboard / Report]
+    F --> G[User actions / Remediation]
+```

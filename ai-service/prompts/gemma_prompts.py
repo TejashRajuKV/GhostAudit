@@ -89,7 +89,7 @@ def generate_prosecutor_verdict(case_data: dict, transactions: list, risk_replay
 
 
 def build_explain_prompt(case_data: dict, verdict_data: dict) -> str:
-    return f"""You are explaining a financial compliance finding to a small business owner who has no accounting background.
+    return f"""You are summarizing a financial compliance anomaly for a small business owner.
 
 FINDING:
 - Business flagged: {case_data.get('vendor_name')}
@@ -97,17 +97,30 @@ FINDING:
 - Verdict: {verdict_data.get('verdict')}
 - Reasoning: {verdict_data.get('verdict_reasoning', '')}
 
-Write 3-4 plain English sentences for a non-expert. No jargon. Cover:
-1. What was found
-2. Why it matters to the business
-3. What they should do next
+Write a 2-3 line summary in layman terms explaining exactly what the anomaly is and why it was flagged. Do not include recommendations or jargon.
 
-Return only the explanation text, no JSON, no bullet points."""
+Return ONLY the raw 2-3 line summary. Do NOT return JSON. Do NOT wrap it in any tags like <explanation>."""
 
 
 def generate_explanation(case_data: dict, verdict_data: dict) -> str:
     prompt = build_explain_prompt(case_data, verdict_data)
-    return call_gemma(prompt, max_tokens=400).strip()
+    raw = call_gemma(prompt, max_tokens=600).strip()
+    
+    # Sometimes Gemma wraps in json or <explanation> tags despite instructions
+    import re
+    raw = re.sub(r'<explanation>', '', raw, flags=re.IGNORECASE)
+    raw = re.sub(r'</explanation>', '', raw, flags=re.IGNORECASE)
+    
+    # Check if it looks like JSON
+    if raw.startswith('{'):
+        try:
+            parsed = json.loads(raw)
+            if 'summary' in parsed:
+                raw = parsed['summary']
+        except json.JSONDecodeError:
+            pass
+            
+    return raw.strip()
 
 
 def build_report_prompt(cases: list) -> str:

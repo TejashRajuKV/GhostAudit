@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   amount REAL NOT NULL,
   invoice_number TEXT,
   invoice_date TEXT,
+  payment_date TEXT,
   approval_threshold REAL DEFAULT 100000,
   description TEXT,
   is_flagged INTEGER DEFAULT 0,
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS cases (
   confidence INTEGER DEFAULT 50,
   status TEXT DEFAULT 'OPEN',
   summary TEXT,
+  feedback_text TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (vendor_id) REFERENCES vendors(id)
