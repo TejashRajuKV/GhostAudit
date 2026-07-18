@@ -1,0 +1,52 @@
+services:
+  # 1. Python AI Microservice (Gemma)
+  - type: web
+    name: ghostaudit-ai
+    env: python
+    rootDir: ai-service
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false # You will need to paste your API key in the Render dashboard
+
+  # 2. Node.js Backend Engine
+  - type: web
+    name: ghostaudit-backend
+    env: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node src/index.js
+    envVars:
+      # Automatically link the AI Service URL
+      - key: AI_SERVICE_URL
+        fromService:
+          type: web
+          name: ghostaudit-ai
+          envVarKey: RENDER_EXTERNAL_URL
+      # Automatically link the Frontend URL for CORS
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: ghostaudit-frontend
+          envVarKey: RENDER_EXTERNAL_URL
+
+  # 3. React Frontend UI
+  - type: web
+    name: ghostaudit-frontend
+    env: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      # This handles the React Router 404 issue automatically!
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # Automatically link the Backend URL so Vite compiles it into the app
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: ghostaudit-backend
+          envVarKey: RENDER_EXTERNAL_URL
