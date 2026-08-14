@@ -242,7 +242,7 @@ function getVerdict(req, res) {
   res.json(verdict);
 }
 
-// POST /api/cases/:id/feedback
+// GET /api/cases/:id/feedback
 function submitFeedback(req, res) {
   const db = getDb();
   const { status, feedbackText } = req.body; // 'CONFIRMED', 'DISMISSED'
@@ -257,6 +257,64 @@ function submitFeedback(req, res) {
   }
   
   res.json({ success: true, status });
+}
+
+// PUT /api/cases/:id - Update case
+function updateCase(req, res) {
+  const db = getDb();
+  const { id } = req.params;
+  const { status, severity, assignedTo, description } = req.body;
+  
+  const updates = [];
+  const values = [];
+  
+  if (status) {
+    updates.push('status = ?');
+    values.push(status);
+  }
+  if (severity) {
+    updates.push('severity = ?');
+    values.push(severity);
+  }
+  if (assignedTo !== undefined) {
+    updates.push('assigned_to = ?');
+    values.push(assignedTo);
+  }
+  if (description !== undefined) {
+    updates.push('summary = ?');
+    values.push(description);
+  }
+  
+  if (updates.length === 0) {
+    return res.status(400).json({ error: 'No fields to update' });
+  }
+  
+  updates.push('updated_at = CURRENT_TIMESTAMP');
+  values.push(id);
+  
+  try {
+    db.prepare(`UPDATE cases SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+    const updatedCase = db.prepare('SELECT * FROM cases WHERE id = ?').get(id);
+    res.json({ success: true, case: updatedCase });
+  } catch (err) {
+    console.error('Update case error:', err);
+    res.status(500).json({ error: 'Failed to update case', details: err.message });
+  }
+}
+
+// DELETE /api/cases/:id - Delete case
+function deleteCase(req, res) {
+  const db = getDb();
+  const { id } = req.params;
+  
+  try {
+    db.prepare('DELETE FROM verdicts WHERE case_id = ?').run(id);
+    db.prepare('DELETE FROM cases WHERE id = ?').run(id);
+    res.json({ success: true, message: 'Case deleted successfully' });
+  } catch (err) {
+    console.error('Delete case error:', err);
+    res.status(500).json({ error: 'Failed to delete case', details: err.message });
+  }
 }
 
 // --- Helpers ---
@@ -295,4 +353,13 @@ function getGhostIssues(vendor) {
   return issues;
 }
 
-module.exports = { scanCases, getCases, getCaseById, generateVerdict, getVerdict, submitFeedback };
+module.exports = { 
+  scanCases, 
+  getCases, 
+  getCaseById, 
+  generateVerdict, 
+  getVerdict, 
+  submitFeedback,
+  updateCase,
+  deleteCase
+};

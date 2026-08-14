@@ -5,10 +5,7 @@ require('dotenv').config();
 
 async function login(req, res) {
   const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password required' });
-  }
-
+  
   const db = getDb();
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
   if (!user) return res.status(401).json({ error: 'Invalid credentials' });
@@ -22,7 +19,23 @@ async function login(req, res) {
     { expiresIn: '24h' }
   );
 
-  res.json({ token, user: { id: user.id, email: user.email, role: user.role } });
+  // Set token in httpOnly cookie for security
+  res.cookie('token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  });
+
+  res.json({ 
+    token, 
+    user: { id: user.id, email: user.email, role: user.role } 
+  });
 }
 
-module.exports = { login };
+async function logout(req, res) {
+  res.clearCookie('token');
+  res.json({ message: 'Logged out successfully' });
+}
+
+module.exports = { login, logout };

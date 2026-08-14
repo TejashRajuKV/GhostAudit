@@ -15,6 +15,25 @@ function getDb() {
     db = new Database(DB_PATH);
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
+    
+    // Add performance indexes if they don't exist
+    try {
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_transactions_vendor_id ON transactions(vendor_id);
+        CREATE INDEX IF NOT EXISTS idx_transactions_invoice_date ON transactions(invoice_date);
+        CREATE INDEX IF NOT EXISTS idx_transactions_amount ON transactions(amount);
+        CREATE INDEX IF NOT EXISTS idx_transactions_is_flagged ON transactions(is_flagged);
+        CREATE INDEX IF NOT EXISTS idx_cases_vendor_id ON cases(vendor_id);
+        CREATE INDEX IF NOT EXISTS idx_cases_fraud_type ON cases(fraud_type);
+        CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);
+        CREATE INDEX IF NOT EXISTS idx_cases_confidence ON cases(confidence);
+        CREATE INDEX IF NOT EXISTS idx_vendors_ghost_score ON vendors(ghost_score);
+        CREATE INDEX IF NOT EXISTS idx_verdicts_case_id ON verdicts(case_id);
+      `);
+      console.log('✅ Database indexes created');
+    } catch (err) {
+      console.error('Error creating indexes:', err.message);
+    }
   }
   return db;
 }
