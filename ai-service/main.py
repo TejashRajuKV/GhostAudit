@@ -14,12 +14,18 @@ from prompts.gemma_prompts import (
     generate_prosecutor_verdict,
     generate_explanation,
     generate_audit_report,
+    generate_playbook,
+    generate_ask,
+    generate_negotiation_email,
 )
 from mock_responses import (
     MOCK_RISK_REPLAY,
     MOCK_PROSECUTOR,
     MOCK_EXPLANATION,
     MOCK_REPORT,
+    MOCK_PLAYBOOK,
+    MOCK_ASK,
+    MOCK_NEGOTIATION,
 )
 
 # Set USE_MOCK=true in .env to always use mock (for demos without API access)
@@ -118,3 +124,63 @@ async def generate_report(req: ReportRequest):
         return {**MOCK_REPORT, "_source": "mock_fallback", "_error": str(e)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Report generation failed: {str(e)}")
+
+
+
+class AskRequest(BaseModel):
+    question: str
+    context: dict
+
+
+@app.post("/ask")
+async def ask_ledger(req: AskRequest):
+    """RAG-grounded Q&A over the ledger context supplied by the backend."""
+    if USE_MOCK:
+        return {**MOCK_ASK, "_source": "mock"}
+    try:
+        result = generate_ask(req.question, req.context)
+        return {**result, "_source": "gemma"}
+    except RuntimeError as e:
+        print(f"[WARN] Gemma API error, falling back to mock ask: {e}")
+        return {**MOCK_ASK, "_source": "mock_fallback", "_error": str(e)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ledger Q&A failed: {str(e)}")
+
+
+@app.post("/playbook")
+async def remediation_playbook(req: AnalyzeRequest):
+    """Generate a step-by-step remediation playbook for a analyzed case."""
+    if USE_MOCK:
+        return {**MOCK_PLAYBOOK, "_source": "mock"}
+    try:
+        verdict_data = {"verdict": req.case.get("fraud_type"), "confidence": req.case.get("confidence")}
+        pb = generate_playbook(req.case, req.transactions, verdict_data)
+        return {**pb, "_source": "gemma"}
+    except RuntimeError as e:
+        print(f"[WARN] Gemma API error, falling back to mock playbook: {e}")
+        return {**MOCK_PLAYBOOK, "_source": "mock_fallback", "_error": str(e)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Playbook generation failed: {str(e)}")
+
+
+
+class NegotiateRequest(BaseModel):
+    case: dict
+    verdict: Optional[dict] = None
+    explanation: Optional[str] = None
+    tone: Optional[str] = "professional"
+
+
+@app.post("/negotiate")
+async def negotiate_vendor(req: NegotiateRequest):
+    """AI Negotiator: draft a clarification/recovery email to the vendor."""
+    if USE_MOCK:
+        return {**MOCK_NEGOTIATION, "_source": "mock"}
+    try:
+        result = generate_negotiation_email(req.case, req.verdict or {}, req.explanation or "", req.tone or "professional")
+        return {**result, "_source": "gemma"}
+    except RuntimeError as e:
+        print(f"[WARN] Gemma API error, falling back to mock negotiation: {e}")
+        return {**MOCK_NEGOTIATION, "_source": "mock_fallback", "_error": str(e)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Negotiation drafting failed: {str(e)}")

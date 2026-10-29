@@ -170,3 +170,69 @@ def generate_audit_report(cases: list) -> dict:
     prompt = build_report_prompt(cases)
     raw = call_gemma(prompt, max_tokens=2000)
     return extract_json(raw)
+
+
+def build_playbook_prompt(case_data: dict, transactions: list, verdict_data: dict) -> str:
+    return f"""You are a compliance remediation expert. Based on this fraud case analysis, produce an actionable remediation playbook for the finance/audit team.
+
+CASE: {case_data.get('fraud_type')} — vendor {case_data.get('vendor_name', 'Unknown')}
+SUMMARY: {case_data.get('summary')}
+VERDICT: {(verdict_data or {}).get('verdict', 'n/a')} (confidence {(verdict_data or {}).get('confidence', 0)}%)
+
+Respond ONLY with valid JSON in this exact format:
+{{
+  "immediate_actions": ["...", "..."],
+  "investigation_steps": ["..."],
+  "control_fixes": ["..."],
+  "legal_compliance": ["..."],
+  "owner_roles": {{"finance": "...", "internal_audit": "...", "legal": "..."}},
+  "timeline_days": 14,
+  "estimated_exposure_inr": 0
+}}"""
+
+
+def generate_playbook(case_data: dict, transactions: list, verdict_data: dict) -> dict:
+    prompt = build_playbook_prompt(case_data, transactions, verdict_data)
+    return extract_json(call_gemma(prompt, max_tokens=900))
+
+
+def build_ask_prompt(question: str, context: dict) -> str:
+    import json as _json
+    ctx_str = _json.dumps(context, default=str)[:6000]
+    return f"""You are GhostAudit's ledger assistant. Answer the user's question using ONLY the retrieved ledger context below. If the answer isn't in the context, say so and suggest which report to run. Be concise (under 150 words), cite invoice numbers/case IDs where relevant.
+
+QUESTION: {question}
+
+RETRIEVED CONTEXT:
+{ctx_str}
+
+Respond ONLY with valid JSON: {{"answer": "...", "confidence": 0-100}}"""
+
+
+def generate_ask(question: str, context: dict) -> dict:
+    prompt = build_ask_prompt(question, context)
+    return extract_json(call_gemma(prompt, max_tokens=512))
+
+
+# ── AI Negotiator (Feature #43) ─────────────────────────────────
+def build_negotiation_prompt(case_data: dict, verdict_data: dict, explanation: str, tone: str) -> str:
+    import json as _json
+    return f"""You are a professional accounts-receivable negotiator and compliance officer.
+A fraud/compliance case has been flagged against this vendor. Draft a firm but courteous clarification email to the vendor.
+
+CASE DETAILS: {_json.dumps(case_data, default=str)[:2500]}
+VERDICT: {_json.dumps(verdict_data, default=str)}
+PLAIN-LANGUAGE SUMMARY: {explanation[:1500] if explanation else "Not yet analyzed"}
+TONE: {tone}
+
+Requirements:
+- Reference specific invoice numbers/dates from the case where possible.
+- Ask targeted clarification questions (purpose of split invoices, GSTIN registration, payment confirmation, etc.).
+- State a clear response deadline (7 working days) and next steps if unanswered.
+- Do NOT admit liability or accuse outright; use "appears inconsistent with our records".
+Respond ONLY with valid JSON: {{"subject": "...", "email_body": "...", "key_questions": ["...", "..."], "deadline_days": 7}}"""
+
+
+def generate_negotiation_email(case_data: dict, verdict_data: dict, explanation: str, tone: str = "professional") -> dict:
+    prompt = build_negotiation_prompt(case_data, verdict_data, explanation, tone)
+    return extract_json(call_gemma(prompt, max_tokens=900))
