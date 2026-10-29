@@ -1,12 +1,13 @@
 const { getDb } = require('../db');
 const axios = require('axios');
+const { appendAudit } = require('../services/audit.service');
+const { broadcast } = require('../controllers/notification.controller');
 require('dotenv').config();
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 
-// POST /api/cases/scan — run detection engine
-async function scanCases(req, res) {
-  try {
+// Core detection engine — shared by HTTP endpoint and scheduler
+function runScanCore(userEmail) {
     const db = getDb();
 
     // Clear old auto-generated cases from previous scans
@@ -141,7 +142,19 @@ async function scanCases(req, res) {
       ORDER BY c.confidence DESC
     `).all();
 
-    res.json({ scanned: true, newCasesFound: cases.length, cases: allCases });
+    appendAudit('CASE_SCAN', 'system', null, userEmail, { newCases: cases.length, detected: cases.map(c => ({ id: c.id, type: c.type, vendor: c.vendor })) });
+    if (cases.length > 0) {
+      try { broadcast(`${cases.length} new fraud case(s) detected`, cases.slice(0,3).map(c => `${c.type}: ${c.vendor}`).join(', '), '/dashboard'); } catch (e) { /* non-fatal */ }
+    }
+
+    return { newCases: cases, cases: allCases };
+}
+
+// POST /api/cases/scan — run detection engine
+async function scanCases(req, res) {
+  try {
+    const result = runScanCore(req.user?.email);
+    res.json({ scanned: true, newCasesFound: result.newCases.length, cases: result.cases });
   } catch (err) {
     console.error('Scan error:', err);
     res.status(500).json({ error: 'Scan failed', details: err.message });
@@ -242,21 +255,58 @@ function getVerdict(req, res) {
   res.json(verdict);
 }
 
-// GET /api/cases/:id/feedback
+// POST /api/cases/:id/feedback — human verdict on AI output (feeds calibration loop)
 function submitFeedback(req, res) {
   const db = getDb();
   const { status, feedbackText } = req.body; // 'CONFIRMED', 'DISMISSED'
   if (!['CONFIRMED', 'DISMISSED'].includes(status)) {
     return res.status(400).json({ error: 'Status must be CONFIRMED or DISMISSED' });
   }
-  
+
+  const prev = db.prepare('SELECT status FROM cases WHERE id = ?').get(req.params.id);
+  if (!prev) return res.status(404).json({ error: 'Case not found' });
+
   if (feedbackText) {
     db.prepare("UPDATE cases SET status = ?, feedback_text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, feedbackText, req.params.id);
   } else {
     db.prepare("UPDATE cases SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, req.params.id);
   }
-  
+
+  // Workflow history + hash-chained audit trail
+  db.prepare('INSERT INTO case_history (case_id, user_email, from_status, to_status, note) VALUES (?, ?, ?, ?, ?)')
+    .run(req.params.id, req.user?.email || 'system', prev.status, status, feedbackText || null);
+  appendAudit('CASE_FEEDBACK', 'case', parseInt(req.params.id), req.user?.email, { from: prev.status, to: status, feedback: feedbackText || null });
+
   res.json({ success: true, status });
+}
+
+// GET /api/cases/accuracy — AI-vs-human agreement calibration stats
+function getAccuracy(req, res) {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT vd.verdict as ai_verdict, c.status as human_status, COUNT(*) as n
+    FROM verdicts vd JOIN cases c ON vd.case_id = c.id
+    WHERE c.status IN ('CONFIRMED','DISMISSED')
+    GROUP BY vd.verdict, c.status
+  `).all();
+
+  let agree = 0, total = 0;
+  const matrix = {};
+  for (const r of rows) {
+    total += r.n;
+    const aiSaysGuilty = ['GUILTY', 'HIGH_RISK', 'SUSPECTED'].includes((r.ai_verdict || '').toUpperCase());
+    const humanAgrees = (r.human_status === 'CONFIRMED' && aiSaysGuilty) || (r.human_status === 'DISMISSED' && !aiSaysGuilty);
+    if (humanAgrees) agree += r.n;
+    matrix[`${r.ai_verdict} -> ${r.human_status}`] = r.n;
+  }
+  res.json({
+    samples: total,
+    agreementRate: total ? +(agree / total * 100).toFixed(1) : null,
+    matrix,
+    guidance: total < 5 ? 'Collect more reviewer decisions to calibrate.' :
+      (agree / total) >= 0.8 ? 'AI verdicts align with human reviewers at 80%+ — high trust tier.' :
+      'Reviewer overrides are frequent — consider raising confidence thresholds before auto-confirmation.'
+  });
 }
 
 // PUT /api/cases/:id - Update case
@@ -293,8 +343,16 @@ function updateCase(req, res) {
   values.push(id);
   
   try {
+    const prev = db.prepare('SELECT status FROM cases WHERE id = ?').get(id);
     db.prepare(`UPDATE cases SET ${updates.join(', ')} WHERE id = ?`).run(...values);
     const updatedCase = db.prepare('SELECT * FROM cases WHERE id = ?').get(id);
+    if (status && prev && prev.status !== status) {
+      db.prepare('INSERT INTO case_history (case_id, user_email, from_status, to_status, note) VALUES (?, ?, ?, ?, ?)')
+        .run(id, req.user?.email || 'system', prev.status, status, 'Manual transition');
+      appendAudit('CASE_STATUS_CHANGE', 'case', parseInt(id), req.user?.email, { from: prev.status, to: status });
+    } else {
+      appendAudit('CASE_UPDATE', 'case', parseInt(id), req.user?.email, { fields: updates.map(u => u.split(' =')[0]) });
+    }
     res.json({ success: true, case: updatedCase });
   } catch (err) {
     console.error('Update case error:', err);
@@ -310,6 +368,7 @@ function deleteCase(req, res) {
   try {
     db.prepare('DELETE FROM verdicts WHERE case_id = ?').run(id);
     db.prepare('DELETE FROM cases WHERE id = ?').run(id);
+    appendAudit('CASE_DELETE', 'case', parseInt(id), req.user?.email, { by: req.user?.role });
     res.json({ success: true, message: 'Case deleted successfully' });
   } catch (err) {
     console.error('Delete case error:', err);
@@ -353,6 +412,73 @@ function getGhostIssues(vendor) {
   return issues;
 }
 
+// GET /api/cases/:id/history — workflow state transitions
+function getCaseHistory(req, res) {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM case_history WHERE case_id = ? ORDER BY created_at ASC').all(req.params.id);
+  res.json(rows);
+}
+
+
+// POST /api/cases/:id/playbook — AI-generated remediation playbook
+async function generatePlaybook(req, res) {
+  const db = getDb();
+  const { id } = req.params;
+  const caseData = db.prepare(`
+    SELECT c.*, v.name as vendor_name FROM cases c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE c.id = ?
+  `).get(id);
+  if (!caseData) return res.status(404).json({ error: 'Case not found' });
+
+  const txIds = JSON.parse(caseData.transaction_ids || '[]');
+  const transactions = txIds.length
+    ? db.prepare(`SELECT * FROM transactions WHERE id IN (${txIds.map(() => '?').join(',')})`).all(...txIds)
+    : [];
+
+  try {
+    const aiRes = await axios.post(`${AI_SERVICE_URL}/playbook`, { case: caseData, transactions }, { timeout: 180000 });
+    appendAudit('PLAYBOOK_GENERATED', 'case', parseInt(id), req.user?.email, null);
+    res.json(aiRes.data);
+  } catch (err) {
+    console.error('Playbook error:', err.message);
+    res.status(502).json({ error: 'Playbook generation failed', details: err.message });
+  }
+}
+
+// ── Evidence Locker (tamper-evident attachments) ────────────────
+// POST /api/cases/:id/evidence  { filename, mimeType, sizeBytes, contentBase64 }
+function uploadEvidence(req, res) {
+  const db = getDb();
+  const crypto = require('crypto');
+  const { filename, mimeType, sizeBytes, contentBase64 } = req.body;
+  if (!filename || !contentBase64) return res.status(400).json({ error: 'filename and contentBase64 required' });
+
+  const buf = Buffer.from(contentBase64, 'base64');
+  if (buf.length > 5 * 1024 * 1024) return res.status(413).json({ error: 'File exceeds 5MB limit' });
+
+  const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
+  const fsx = require('fs');
+  const pathx = require('path');
+  const dir = pathx.resolve(__dirname, '../../../database/evidence/' + req.params.id);
+  fsx.mkdirSync(dir, { recursive: true });
+  const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+  fsx.writeFileSync(pathx.join(dir, sha256.slice(0, 12) + '_' + safeName), buf);
+
+  const info = db.prepare(`
+    INSERT INTO evidence_files (case_id, filename, mime_type, size_bytes, sha256, uploaded_by)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(req.params.id, safeName, mimeType || 'application/octet-stream', sizeBytes ?? buf.length, sha256, req.user?.email || 'system');
+
+  appendAudit('EVIDENCE_UPLOAD', 'evidence', Number(info.lastInsertRowid), req.user?.email, { case_id: parseInt(req.params.id), filename: safeName, sha256 });
+  res.json({ success: true, id: Number(info.lastInsertRowid), sha256 });
+}
+
+// GET /api/cases/:id/evidence
+function listEvidence(req, res) {
+  const db = getDb();
+  const rows = db.prepare('SELECT id, case_id, filename, mime_type, size_bytes, sha256, uploaded_by, created_at FROM evidence_files WHERE case_id = ? ORDER BY created_at DESC').all(req.params.id);
+  res.json(rows);
+}
+
 module.exports = { 
   scanCases, 
   getCases, 
@@ -360,6 +486,75 @@ module.exports = {
   generateVerdict, 
   getVerdict, 
   submitFeedback,
+  getAccuracy,
   updateCase,
-  deleteCase
+  deleteCase,
+  getCaseHistory,
+  generatePlaybook,
+  uploadEvidence,
+  listEvidence,
+  getCaseTimeline
 };
+
+
+// GET /api/v1/cases/:id/timeline — Feature #8 Timeline Investigation + Storyboard (#9)
+function getCaseTimeline(req, res) {
+  try {
+    const db = getDb();
+    const c = db.prepare('SELECT * FROM cases WHERE id = ?').get(req.params.id);
+    if (!c) return res.status(404).json({ error: 'Case not found' });
+    const txIds = JSON.parse(c.transaction_ids || '[]');
+    const events = [];
+    const txs = txIds.length
+      ? db.prepare(`SELECT * FROM transactions WHERE id IN (${txIds.map(()=>'?').join(',')}) ORDER BY invoice_date ASC`).all(...txIds)
+      : [];
+    for (const t of txs) {
+      events.push({ date: t.invoice_date, type: 'INVOICE', title: `Invoice ${t.invoice_number} raised`, detail: `₹${Number(t.amount).toLocaleString('en-IN')} · threshold ₹${Number(t.approval_threshold||0).toLocaleString('en-IN')}`, amount: t.amount });
+      if (t.payment_date) events.push({ date: t.payment_date, type: 'PAYMENT', title: `Payment made for ${t.invoice_number}`, detail: `Paid ${Math.round((new Date(t.payment_date)-new Date(t.invoice_date))/86400000)} days after invoice`, amount: t.amount });
+    }
+    const hist = db.prepare('SELECT action, created_at, actor FROM case_history WHERE case_id = ? ORDER BY created_at ASC').all(c.id);
+    for (const h of hist) events.push({ date: (h.created_at||'').slice(0,10), type: 'REVIEW', title: h.action, detail: `by ${h.actor||'system'}` });
+    events.sort((a,b) => String(a.date).localeCompare(String(b.date)));
+    const verdict = db.prepare('SELECT * FROM verdicts WHERE case_id = ?').get(c.id);
+    const storyboard = [
+      `Act 1 — The Setup: ${c.fraud_type} pattern detected involving vendor #${c.vendor_id ?? '—'} across ${txs.length} transaction(s).`,
+      `Act 2 — The Pattern: ${events.filter(e=>e.type==='INVOICE').map(e=>e.title).slice(0,3).join('; ')}.`,
+      `Act 3 — The Flag: Case opened with severity ${c.severity || c.risk_score || 'UNKNOWN'} on ${(c.created_at||'').slice(0,10)}.`,
+      verdict ? `Act 4 — The Verdict: AI Prosecutor returned "${verdict.verdict}" — ${String(verdict.reasoning||'').slice(0,140)}` : 'Act 4 — Awaiting AI Prosecutor verdict.',
+    ];
+    res.json({ caseId: Number(c.id), events, storyboard });
+  } catch (e) { res.status(500).json({ error: 'Timeline build failed', details: e.message }); }
+}
+
+// ── AI Negotiator (Feature #43): draft a clarification email to the vendor ──
+async function draftNegotiationEmail(req, res) {
+  const db = getDb();
+  const { id } = req.params;
+  const caseData = db.prepare(`
+    SELECT c.*, v.name as vendor_name, v.gstin, v.address FROM cases c
+    LEFT JOIN vendors v ON c.vendor_id = v.id WHERE c.id = ?
+  `).get(id);
+  if (!caseData) return res.status(404).json({ error: 'Case not found' });
+
+  const verdict = db.prepare('SELECT * FROM verdicts WHERE case_id = ?').get(id);
+  let explanationText = null;
+  if (verdict && verdict.explanation) {
+    try { explanationText = JSON.parse(verdict.explanation); } catch (e) { explanationText = verdict.explanation; }
+  }
+
+  try {
+    const aiRes = await axios.post(`${AI_SERVICE_URL}/negotiate`, {
+      case: caseData,
+      verdict: verdict ? { verdict: verdict.verdict, confidence: verdict.confidence } : null,
+      explanation: explanationText,
+      tone: req.body?.tone || 'professional',
+    }, { timeout: 180000 });
+    appendAudit('NEGOTIATION_DRAFTED', 'case', parseInt(id), req.user?.email, { tone: req.body?.tone || 'professional' });
+    res.json(aiRes.data);
+  } catch (err) {
+    console.error('Negotiation draft error:', err.message);
+    res.status(502).json({ error: 'Negotiation drafting failed', details: err.message });
+  }
+}
+
+module.exports.draftNegotiationEmail = draftNegotiationEmail;

@@ -38,6 +38,42 @@ export const casesApi = {
   generateVerdict: (id) => api.post(`/api/v1/cases/${id}/verdict`),
   getVerdict: (id) => api.get(`/api/v1/cases/${id}/verdict`),
   submitFeedback: (id, status, feedbackText) => api.post(`/api/v1/cases/${id}/feedback`, { status, feedbackText }),
+  history: (id) => api.get(`/api/v1/cases/${id}/history`),
+  playbook: (id) => api.post(`/api/v1/cases/${id}/playbook`),
+  uploadEvidence: (id, payload) => api.post(`/api/v1/cases/${id}/evidence`, payload),
+  listEvidence: (id) => api.get(`/api/v1/cases/${id}/evidence`),
+  negotiate: (id, tone) => api.post(`/api/v1/cases/${id}/negotiate`, { tone }),
+  accuracy: () => api.get('/api/v1/cases/accuracy'),
+};
+
+export const analyticsApi = {
+  benford: (vendorId) => api.get('/api/v1/analytics/benford', { params: vendorId ? { vendorId } : {} }),
+  duplicates: () => api.get('/api/v1/analytics/duplicates'),
+  thresholds: () => api.get('/api/v1/analytics/thresholds'),
+  riskScores: () => api.get('/api/v1/analytics/risk-scores'),
+  saveRun: (data) => api.post('/api/v1/analytics/save', data),
+  runs: () => api.get('/api/v1/analytics/runs'),
+  msmeDelays: () => api.get('/api/v1/analytics/msme-delays'),
+  drift: () => api.get('/api/v1/analytics/drift'),
+  forecast: () => api.get('/api/v1/analytics/forecast'),
+  peerBenchmark: () => api.get('/api/v1/analytics/peer-benchmark'),
+  shadowProcurement: () => api.get('/api/v1/analytics/shadow-procurement'),
+};
+
+export const networkApi = {
+  get: () => api.get('/api/v1/network'),
+};
+
+export const notificationsApi = {
+  list: () => api.get('/api/v1/notifications'),
+  markRead: (id) => api.post(`/api/v1/notifications/${id}/read`),
+  markAllRead: () => api.post('/api/v1/notifications/read-all'),
+};
+
+export const copilotApi = {
+  ask: (question) => api.post('/api/v1/copilot/ask', { question }),
+  ingestPolicy: (title, text) => api.post('/api/v1/copilot/policy', { title, text }),
+  listPolicies: () => api.get('/api/v1/copilot/policy'),
 };
 
 export const transactionsApi = {

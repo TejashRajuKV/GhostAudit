@@ -100,3 +100,60 @@ MOCK_REPORT = {
         "Conduct a vendor onboarding audit — verify GSTIN, physical address, and bank account details for all active vendors above ₹25,000/month"
     ]
 }
+
+
+MOCK_PLAYBOOK = {
+    "immediate_actions": [
+        "Freeze all pending payments to the flagged vendor",
+        "Notify CFO and head of internal audit within 24 hours",
+        "Preserve invoices, POs, and approval emails (litigation hold)"
+    ],
+    "investigation_steps": [
+        "Interview the requisitioner and approver of each invoice",
+        "Verify vendor GSTIN status on the GST portal and request ITC reconciliation (GSTR-2B vs books)",
+        "Trace bank credits — confirm account holder name matches registered vendor name",
+        "Check shared IP/device fingerprints in the vendor master change log"
+    ],
+    "control_fixes": [
+        "Add system rule: block >2 sub-threshold invoices per vendor per 30-day window without senior sign-off",
+        "Enable duplicate-invoice hard stop on (vendor, invoice_number, amount)",
+        "Quarterly Benford screening of AP ledger"
+    ],
+    "legal_compliance": [
+        "Assess STR filing obligation with FIU-IND under PMLA",
+        "Review Section 9(1)(g) CGST Act exposure for ITC on ghost supplies",
+        "Escalate to legal counsel if confirmed collusion with employee"
+    ],
+    "owner_roles": {
+        "finance": "Payment freeze + vendor master remediation",
+        "internal_audit": "Investigation lead + evidence custody",
+        "legal": "Regulatory notifications and recovery"
+    },
+    "timeline_days": 14,
+    "estimated_exposure_inr": 197400
+}
+
+MOCK_ASK = {
+    "answer": "Based on the retrieved ledger context: there are open split-invoice and ghost-vendor cases concentrated around Nexus Trade Enterprises and Global Infra Services, with structured invoices just below approval thresholds. The most material exposure is the ~₹1.97L cluster flagged in case #1. Recommend running the Threshold Evasion analyzer and reviewing case #1's verdict before payment release.",
+    "confidence": 78
+}
+
+
+MOCK_NEGOTIATION = {
+    "subject": "Request for Clarification — Invoice Records Under Compliance Review",
+    "email_body": ("Dear Accounts Team,\n\n"
+                   "During our periodic compliance review, certain invoices recorded against your vendor account appear inconsistent with our internal approval records — specifically, multiple invoices issued in close succession with amounts just below our ₹1,00,000 single-approval threshold.\n\n"
+                   "To help us reconcile our books before our statutory audit, could you please:\n"
+                   "1. Confirm whether these invoices relate to separate supply events or a single consolidated order that was billed in parts.\n"
+                   "2. Share the corresponding purchase orders / delivery challans for each invoice referenced.\n"
+                   "3. Verify your current GSTIN registration details and registered address.\n\n"
+                   "We would appreciate a response within 7 working days. If we do not hear back, we may need to place a temporary hold on pending payments until reconciliation is complete. This is a routine record check and we value our ongoing relationship with you.\n\n"
+                   "Warm regards,\nFinance & Compliance Team"),
+    "key_questions": [
+        "Do the clustered invoices represent distinct supply events or one order billed in splits?",
+        "Can POs and delivery challans be shared for each flagged invoice number?",
+        "Is the GSTIN and registered address on file still current?",
+        "Were any credit notes issued that would explain repeated amounts?"
+    ],
+    "deadline_days": 7
+}

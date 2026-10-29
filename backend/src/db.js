@@ -34,6 +34,14 @@ function getDb() {
     } catch (err) {
       console.error('Error creating indexes:', err.message);
     }
+
+    // Lightweight migrations: add columns introduced after first release
+    try {
+      const cols = db.prepare("PRAGMA table_info(cases)").all().map(c => c.name);
+      if (!cols.includes('assigned_to')) db.exec('ALTER TABLE cases ADD COLUMN assigned_to TEXT');
+    } catch (err) {
+      console.error('Migration warning:', err.message);
+    }
   }
   return db;
 }

@@ -9,6 +9,10 @@ import ReadinessChecker from './pages/ReadinessChecker';
 import TransactionsPage from './pages/TransactionsPage';
 import DataEntryPage from './pages/DataEntryPage';
 import VendorRiskPage from './pages/VendorRiskPage';
+import NetworkPage from './pages/NetworkPage';
+import AnalyticsPage from './pages/AnalyticsPage';
+import CopilotPage from './pages/CopilotPage';
+import IntelLabPage from './pages/IntelLabPage';
 
 export const ModeContext = React.createContext();
 
@@ -45,6 +49,18 @@ function Layout({ children }) {
           </NavLink>
           <NavLink to="/vendors" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             🏢 Vendors & Risk
+          </NavLink>
+          <NavLink to="/network" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            🕸️ Collusion Network
+          </NavLink>
+          <NavLink to="/analytics" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            🔬 Analytics Lab
+          </NavLink>
+          <NavLink to="/copilot" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            💬 Ask Ledger
+          </NavLink>
+          <NavLink to="/intel" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            🧪 Intel Lab
           </NavLink>
           <NavLink to="/data-entry" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             📥 Data Entry
@@ -114,6 +130,18 @@ export default function App() {
         } />
         <Route path="/data-entry" element={
           <PrivateRoute><Layout><DataEntryPage /></Layout></PrivateRoute>
+        } />
+        <Route path="/network" element={
+          <PrivateRoute><Layout><NetworkPage /></Layout></PrivateRoute>
+        } />
+        <Route path="/analytics" element={
+          <PrivateRoute><Layout><AnalyticsPage /></Layout></PrivateRoute>
+        } />
+        <Route path="/copilot" element={
+          <PrivateRoute><Layout><CopilotPage /></Layout></PrivateRoute>
+        } />
+        <Route path="/intel" element={
+          <PrivateRoute><Layout><IntelLabPage /></Layout></PrivateRoute>
         } />
         <Route path="/report" element={
           <PrivateRoute><Layout><ReportPage /></Layout></PrivateRoute>
